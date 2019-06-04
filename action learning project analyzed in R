@@ -1,0 +1,185 @@
+#####action learning project analyzed in R#####
+library(h2o)
+h2o.init(nthreads = -1)
+trainfinal<-read.csv("~/Desktop/alp/train_tusa 2.csv")
+test<-read.csv("~/Desktop/alp/test_tusa 2.csv")
+
+
+trainfinal$isPurchase<-ifelse(trainfinal$transactionRevenue>0,1,0)
+trainfinal$logRevenue<-log(trainfinal$transactionRevenue+1)
+trainfinal$hits_c<-scale(trainfinal$hits,center=T,scale=T)
+trainfinal$pageviews_c<-scale(trainfinal$pageviews,center=T,scale=T)
+colnames(trainfinal)
+baselines <- trainfinal[,c(3,9,21,24,41,65,83,89,103,111)]
+colnames(baselines)
+index <- sample(nrow(trainfinal),0.8*nrow(trainfinal))
+trainset <- trainfinal[index,]
+testset <- trainfinal[-index,]
+
+#SPLIT IN TRAIN
+#set.1<-trainfinal[trainfinal$isPurchase==1,]
+#set.0<-trainfinal[trainfinal$isPurchase==0,]
+#set.seed(1234)
+#index.1<-sample(1:nrow(set.1),4000)
+#index.0<-sample(1:nrow(set.0),round(nrow(set.0)*0.8))
+#trainset<-rbind(set.0[index.0,],set.1[index.1,])
+#testset<-rbind(set.0[-index.0,],set.1[-index.1,])
+#dim(trainset)#
+
+colnames(testset)
+
+train.logit <- trainset[,-c(1,3,9,21,24,41,65,83,89,103,111,112,113,114,117)]
+train.reg<-trainset[trainset$isPurchase>0,-c(1,3,9,21,24,41,65,83,89,103,111,112,113,114,116)]
+testfeatures <- testset[,-c(1,3,9,21,24,41,65,83,89,103,111,112,113,114,116,117)]
+colnames(testfeatures)
+# train.reg<- trainfinal[trainfinal$transactionRevenue>0,-c(1,3,9,21,24,41,65,82,88,102,110,111,112,113,114,115)]
+
+library(h2o)
+h2o.init(nthreads = -1)
+colnames(train.reg)
+
+write.csv(train.logit, file = "train.logit0306.csv")
+train.logit_h2o <- h2o.uploadFile("train.logit0306.csv")
+
+write.csv(testfeatures, file = "test0306.csv")
+testset_h2o <- h2o.uploadFile("test0306.csv")
+
+
+colnames(train.logit_h2o)
+colnames(testset_h2o)
+
+train.logit_h2o <- train.logit_h2o[-1]
+testset_h2o <- testset_h2o[-1]
+colnames(testset_h2o)
+
+all <- colnames(train.logit_h2o)
+all
+
+Vx <- all[-c(102)]
+
+Vx
+
+Vy <- all[c(102)]
+
+Vy
+
+#logit without kfold
+raw.logit <- h2o.glm(x = Vx, y=Vy,training_frame = train.logit_h2o,
+                     family = "binomial", model_id = "logit2")
+
+raw.logit.summary <- summary(raw.logit) #0.2795064
+write.csv(raw.logit.summary,"~/Desktop/R/ALP/Final Data/raw_logit_result.csv")
+
+#logit
+h2o.glm_1 <- h2o.glm(x = Vx, y=Vy,training_frame = train.logit_h2o,
+                     family = "binomial", nfolds = 5, alpha = 0.5, lambda_search = FALSE,model_id = "logit2")
+logit_summary_2 <- summary(h2o.glm_1) #R =0.278184
+
+perform1 <- h2o.performance(h2o.glm_1, newdata = testset_h2o) #问题
+h2o.confusionMatrix(perform1)
+
+prediction <- h2o.predict(object = h2o.glm_1, newdata = testset_h2o)
+predictprobability <- prediction[,3]
+
+rmse.logit<-sqrt(mean((test.logit_h2o$isPurchase-predictprobability)**2))
+View(rmse.logit)
+
+#lasso regression
+write.csv(train.reg, file = "train.reg0306.csv")
+train.reg_h2o <- h2o.uploadFile("train.reg0306.csv")
+colnames(train.reg)
+h2o.glm_1 <- h2o.glm(x = Vfeatures, y=V,training_frame = train.logit_h2o,
+                     family = "binomial", nfolds = 5, alpha = 0.5, lambda_search = FALSE,model_id = "logit2")
+logit_summary_2 <- summary(h2o.glm_1)
+#regression
+library(MASS)
+reg<-lm(train.reg$logRevenue~.,data=train.reg)
+step.model <- stepAIC(reg, direction = "both", 
+                      trace = FALSE)
+reg.step<-summary(step.model)
+
+    write.csv(reg.step$coefficients,"~/Desktop/R/ALP/Final Data/reg.result.csv")
+    
+predict.reg<-predict.lm(step.model,newdata=test.reg)
+
+rmse.reg<-sqrt(mean((test.reg$logRevenue-predict.reg)**2))
+rmse.reg
+test.reg$logRevenue*test.logit
+
+
+#test
+prediction
+colnames(test.logit)
+prediction_reg <- predict.lm(step.model,newdata=testset)
+predict_y<-as.h2o(prediction_reg)*predictprobability
+rmse.total<-sqrt(mean((predict_y-testset_h2o$logRevenue)**2))
+rmse.total
+
+
+
+
+#########Question 2. Predict the Test Data Set##################
+library(h2o)
+h2o.init(nthreads = -1)
+test<-h2o.uploadFile("~/Desktop/R/ALP/Final Data/test_tusa.csv")
+test2<-read.csv("~/Desktop/R/ALP/Final Data/test_tusa.csv")
+colnames(test)<-colnames(trainfinal)
+colnames(test2)<-colnames(trainfinal)
+head(testfinal.features)
+
+test$isPurchase<-ifelse(test$transactionRevenue>0,1,0)
+test$logRevenue<-log(test$transactionRevenue+1)
+test$hits_c<-scale(test$hits,center=T,scale=T)
+test$pageviews_c<-scale(test$pageviews,center=T,scale=T)
+colnames(test)
+testfinal.features<-test[,-c(1,3,9,21,24,41,65,83,89,103,111,112,113,114,115,116,117)]
+colnames(testfinal.features)
+
+test2$isPurchase<-ifelse(test2$transactionRevenue>0,1,0)
+test2$logRevenue<-log(test2$transactionRevenue+1)
+test2$hits_c<-scale(test2$hits,center=T,scale=T)
+test2$pageviews_c<-scale(test2$pageviews,center=T,scale=T)
+colnames(test2)
+testfinal2.features<-test2[,-c(1,3,9,21,24,41,65,83,89,103,111,112,113,114,115,116,117)]
+colnames(testfinal2.features)
+
+
+
+test_predict.1<-h2o.predict(object = h2o.glm_1, newdata = testfinal.features)
+test_predict.prob<-test_predict.1[,3]
+test.predict.2<-predict(step.model,newdata=test2)
+test.predict_y<- test.predict.2*as.vector(test_predict.prob)
+
+
+prediction.for.test<-cbind(test2$fullVisitorId,test.predict_y)
+head(prediction.for.test)  
+colnames(prediction.for.test) <-c("fullVisitorId","predicted_log(transactionRevenue+1)")
+
+boxplot(prediction.for.test[,2])
+summary(prediction.for.test[,2])
+
+write.csv(prediction.for.test,"~/Desktop/R/ALP/Final Data/prediction.for.test0305")
+
+
+
+#variables exploration
+colnames(test2)
+summary(trainfinal$transactionRevenue)
+max(trainfinal$transactionRevenue)
+
+library(ggplot2)
+hist(trainfinal[trainfinal$isPurchase>0,]$logRevenue,main="Histogram of log(Revenue+1)",xlab="transactionRevenue>0")
+hist(trainfinal$isPurchase,main="Histogram of isPurchase",xlab="isPurchase=1/0")
+
+
+
+
+#gbm
+gbm_fit3 <- h2o.gbm(Vx,vy,training_frame = train.logit_h2o,model_id = "gbm_fit3",ntrees = 500,nfolds = 5,score_tree_interval = 5,      #used for early stopping, stopping_rounds = 3,          #used for early stopping seed = 1)
+gbm_perf2 <- h2o.performance(model = gbm_fit3,newdata = test.logit_h2o)
+gbm.pred2 <- h2o.predict(gbm_fit3,newdata = test.logit_h2o)
+predict.reg<-predict.lm(step.model,newdata=testset)
+predicty <- as.h2o(predict.reg)*gbm.pred2
+RMSE(predict.reg*gbm.pred2,testset$logRevenue)
+rmse.total3<-sqrt(mean((predicty-as.h2o(testset$logRevenue))**2))
+rmse.total3
